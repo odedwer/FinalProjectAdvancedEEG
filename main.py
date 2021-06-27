@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import scipy
 import preprocess_utilities as pu
 from importlib import reload
+from tqdm import tqdm
 
 
 # %% functions
@@ -48,8 +49,10 @@ raw.filter(l_freq=.5, h_freq=50, method='iir')
 # 2 - RIGHT
 # 3 - fC
 # 4 - nEUTRAL
-event_dict = {"prime_LL": 11, "prime_LR": 12, "prime_RL": 21,
-              "prime_RR": 22}  # , :34, :44, :111, :112, :123, :133, :141, :142, :210, :211, :212, :220, :221, :222
+
+event_dict = {"prime_R_reg": 12, "prime_R_fc": 22,
+              "prime_L_reg": 11,
+              "prime_L_fc": 21}  # , :34, :44, :111, :112, :123, :133, :141, :142, :210, :211, :212, :220, :221, :222
 # , :230, :231, :232, :241, :242, :254}
 epochs_prime = mne.Epochs(raw, events, event_dict, tmin=-.2, tmax=1.1, baseline=(-.2, -.05), reject={'eeg': 300e-6})
 # %% decoding
@@ -58,16 +61,65 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 import sklearn
 
-if __name__ == "__main__":
-    # TODO - train only LL/RR and test on LR/RL etc.
-    lda = LinearDiscriminantAnalysis()
-    clf = make_pipeline(StandardScaler(), lda)
-    time_decoding = mne.decoding.SlidingEstimator(clf, scoring='accuracy', verbose=True, n_jobs=8)
-    labels = epochs_prime.events[:, 2]
-    labels[(labels == 11) | (labels == 12)] = 1
-    labels[labels != 1] = 2
-    scores = mne.decoding.cross_val_multiscore(time_decoding, epochs_prime.get_data('eeg'), labels)
-    avg_scores = scores.mean(0)
-    plt.figure()
-    plt.plot(epochs_prime.times, avg_scores)
-    plt.hlines(0.25, epochs_prime.times.min(), epochs_prime.times.max(), linestyles=':', colors='k', zorder=7)
+# %% TODO - train only LL/RR and test on LR/RL etc.
+lda = LinearDiscriminantAnalysis()
+clf = make_pipeline(StandardScaler(), lda)
+time_decoding = mne.decoding.SlidingEstimator(clf, scoring='roc_auc', verbose=True, n_jobs=8)
+labels = epochs_prime.events[:, 2]
+labels[(labels == 11) | (labels == 21)] = 1
+labels[(labels == 12) | (labels == 22)] = 2
+# scores = mne.decoding.cross_val_multiscore(time_decoding, epochs_prime.get_data('eeg'), labels)
+# avg_scores = scores.mean(0)
+# plt.figure()
+# plt.plot(epochs_prime.times, avg_scores)
+# plt.hlines(0.5, epochs_prime.times.min(), epochs_prime.times.max(), linestyles=':', colors='k', zorder=7)
+# %% train on LL and decode LR
+# TODO: split to test and train based on LL/RR (train) and LR/RL (test)
+event_dict = {"prime_R": 12, "prime_L": 11}
+# , :230, :231, :232, :241, :242, :254}
+epochs_prime = mne.Epochs(raw, events, event_dict, tmin=-.2, tmax=.13, baseline=(-.2, -.05), reject={'eeg': 300e-6})
+event_dict = {"cue_R_reg": 112, "cue_L_reg": 111}
+epochs_cue = mne.Epochs(raw, events, event_dict, tmin=-.2, tmax=.13, baseline=(-.2, -.05), reject={'eeg': 300e-6})
+rr_trials = (epochs_cue.events[:, 2] == 112) & (epochs_prime.events[:, 2] == 12)
+ll_trials = (epochs_cue.events[:, 2] == 111) & (epochs_prime.events[:, 2] == 11)
+rl_trials = (epochs_cue.events[:, 2] == 111) & (epochs_prime.events[:, 2] == 12)
+lr_trials = (epochs_cue.events[:, 2] == 112) & (epochs_prime.events[:, 2] == 11)
+labels = epochs_prime.events[:, 2]
+labels[ll_trials | lr_trials] = 1
+labels[rr_trials | rl_trials] = 2
+train_y = labels[ll_trials | rr_trials]
+test_y = labels[lr_trials | rl_trials]
+train_x = epochs_prime.get_data('eeg')[rr_trials | ll_trials, :, :]
+test_x = epochs_prime.get_data('eeg')[rl_trials | lr_trials, :, :]
+
+# %%
+# lda = LinearDiscriminantAnalysis()
+# clf = make_pipeline(StandardScaler(), lda)
+# time_decoding = mne.decoding.SlidingEstimator(clf, scoring='accuracy', verbose=True, n_jobs=8)
+# scores = mne.decoding.cross_val_multiscore(time_decoding, test_x, test_y)
+# scores=scores.mean(axis=0)
+# plt.figure()
+# plt.plot(epochs_prime.times, scores)
+# plt.hlines(0.5, epochs_prime.times.min(), epochs_prime.times.max(), linestyles=':', colors='k', zorder=7)
+
+# %%
+train_x = train_x[:, :, 225:]
+test_x = test_x[:, :, 225:]
+test_x = test_x.reshape((test_x.shape[0],test_x.shape[1]*test_x.shape[2]))
+train_x = train_x.reshape((train_x.shape[0],train_x.shape[1]*train_x.shape[2]))
+
+lda = LinearDiscriminantAnalysis()
+permutation_scores = np.zeros(2000)
+for i in tqdm(range(permutation_scores.size)):
+    lda.fit(train_x, np.random.choice(train_y,train_y.size,False))
+    permutation_scores[i] = lda.score(test_x, test_y)
+lda.fit(train_x, train_y)
+scores = lda.score(test_x, test_y)
+plt.hist(permutation_scores,bins=25)
+plt.axvline(scores,color="k",linestyle=":",linewidth=3)
+print(f'accuracy is {scores}')
+print(f'subject p-value from permutation is: {np.mean(scores<permutation_scores)}')
+# %%
+plt.figure()
+plt.plot(epochs_prime.times, scores)
+plt.hlines(0.5, epochs_prime.times.min(), epochs_prime.times.max(), linestyles=':', colors='k', zorder=7)

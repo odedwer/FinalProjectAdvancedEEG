@@ -124,9 +124,9 @@ def annotate_bads_auto(raw, reject_criteria, jump_criteria,
             extralist.append(i)
     event_times = np.delete(event_times, extralist)
     event_times = np.append(event_times, raw.times[jumps[:-1]])  # add jumps
-    onsets = event_times - 0.05
+    onsets = event_times - 0.45
     # print("100 ms of data rejected in times:\n", onsets)
-    durations = [0.1] * len(event_times)
+    durations = [0.4] * len(event_times)
     descriptions = ['BAD_data'] * len(event_times)
     annot = mne.Annotations(onsets, durations, descriptions,
                             orig_time=raw.info['meas_date'])

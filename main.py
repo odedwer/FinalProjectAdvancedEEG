@@ -86,19 +86,27 @@ for s in subjects:
         average_decoding_congruency.append((scores_rc + scores_lc) / 2)
     except:
         failed_subject.append(s)
-
+np.save('average_decoding_congruency',average_decoding_congruency)
 print(failed_subject)
 #%%
 mean_subjects_average_decoding_congruency = np.mean(average_decoding_congruency, axis=0)
 std_subjects_average_decoding_congruency = np.std(average_decoding_congruency, axis=0)
 plt.figure()
 for i in range(len(average_decoding_congruency)):
-    plt.plot(epochs_prime.times, average_decoding_congruency[i], color='grey', alpha=0.2)
-plt.plot(epochs_prime.times, mean_subjects_average_decoding_congruency)
+    plt.plot(epochs_prime.times, np.convolve(average_decoding_congruency[i],np.ones(21)/21)[10:-10], color='grey', alpha=0.1) #moving average for better visualization
+plt.plot(epochs_prime.times, mean_subjects_average_decoding_congruency, label="average of all subjects")
+boot_ci = mne.stats.bootstrap_confidence_interval(np.array(average_decoding_congruency),ci=0.99)
+plt.fill_between(epochs_prime.times, boot_ci[1], boot_ci[0], color='#3b7fb9', alpha=0.25,label="99% CI")
 plt.hlines(0.5, epochs_prime.times.min(), epochs_prime.times.max(), linestyles=':', colors='k', zorder=7)
-plt.title(f'Incongruent VS congruent trials decoding for left cues and right cues, blue - average of all subjects')
+plt.xlabel("Time (seconds)")
+plt.ylabel("ROC Area under curve")
+plt.xlim(-0.25,1.05)
+plt.ylim(0.35,0.8)
+plt.legend()
+plt.title(f'Incongruent VS congruent trials decoding for left cues and right cues')
 print(np.mean(mean_subjects_average_decoding_congruency[(0.6>epochs_prime.times) & (epochs_prime.times>0.2)]))
 print(np.mean(std_subjects_average_decoding_congruency[(0.6>epochs_prime.times) & (epochs_prime.times>0.2)]))
+print(np.std(mean_subjects_average_decoding_congruency[(0.6>epochs_prime.times) & (epochs_prime.times>0.2)]))
 print(len(average_decoding_congruency))
 
 

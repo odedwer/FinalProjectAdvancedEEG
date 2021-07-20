@@ -30,6 +30,7 @@ def load_data_clean(subject_number) -> mne.io.Raw:
     pu.set_ch_types(raw, eog_list, 'eog')
     pu.set_ch_types(raw, emg_list, 'emg')
     raw = raw.set_montage('biosemi64')
+    raw.set_eeg_reference()
     raw.interpolate_bads()
     raw.filter(l_freq=.5, h_freq=50, method='iir')
     return raw
@@ -183,8 +184,9 @@ def plot_pip_rt_regression(df, type_list):
 
 # %% prepare data for pip extraction
 if __name__ == "__main__":
-    # subjects = [331, 332, 333, 334, 335, 336, 337, 338, 339, 342, 343, 344, 345, 346, 347, 349, 349]
-    subjects = [332]
+    subjects = [331, 332, 333, 334, 335, 336, 337, 338, 339, 342, 343, 344, 345, 346, 347, 349, 349]
+    #subjects = [332]
+    failed_subject =[]
     for s in subjects:
         try:
             print(f"Reading data for subject {s}...")
@@ -238,8 +240,10 @@ if __name__ == "__main__":
             np.save(f"S{s}_lc_prob_ratios.npy", lc_pip_probs)
             np.save(f"S{s}_rc_prob_ratios.npy", rc_pip_probs)
         except Exception as e:
+            failed_subject.append(s)
             print(f"==================================================\n"
                   f"==================================================\n"
                   f"An error has occurred in subject {s}! The exception is:\n\n{str(e)}\n\n"
                   f"==================================================\n"
                   f"==================================================\n")
+    print(failed_subject)

@@ -95,7 +95,7 @@ def get_trial_pip_score(args) -> Tuple[np.array, np.array, np.array, np.array, n
     for timepoint in range(epochs_data.shape[2]):
         lda.fit(train_x[:, :, timepoint], train_y)
         probs[timepoint, :] = lda.predict_proba(test_x[:, :, timepoint])
-    probs_ratio = probs[:, test_y] / probs[:, 1 - test_y]
+    probs_ratio = probs[:, test_y] / probs[:, 1 - test_y]  # correct / incorrect
     # reset the boolean vector
     epoch_vec[trial_num] = True
     return np.mean(probs_ratio), np.median(probs_ratio), np.mean(probs[:, test_y]), np.median(
@@ -172,17 +172,19 @@ def plot_pip_rt_regression(df, type_list):
         q = df[f"{name}_pip"].quantile(0.95)
         sns.regplot(f"{name}_pip", "RT", df[(df[f"{name}_pip"] < q) & (df['congruent'] == 0)],
                     ax=axes[i // ncol, i % ncol],
-                    color="darkred")
+                    color="darkred", scatter_kws={"alpha": 0.3})
         sns.regplot(f"{name}_pip", "RT", df[(df[f"{name}_pip"] < q) & (df['congruent'] == 1)],
                     ax=axes[i // ncol, i % ncol],
-                    color="darkblue")
+                    color="darkblue", scatter_kws={"alpha": 0.3})
         axes[i // ncol, i % ncol].legend(["Incongruent", "Congruent"])
         axes[i // ncol, i % ncol].set_title(name[0].upper() + name[1:].replace("_", " "))
+    fig.tight_layout()
 
 
 # %% prepare data for pip extraction
 if __name__ == "__main__":
-    subjects = [331, 332, 333, 334, 335, 336, 337, 338, 339, 342, 343, 344, 345, 346, 347, 349, 349]
+    # subjects = [331, 332, 333, 334, 335, 336, 337, 338, 339, 342, 343, 344, 345, 346, 347, 349, 349]
+    subjects = [332]
     for s in subjects:
         try:
             print(f"Reading data for subject {s}...")
@@ -238,6 +240,6 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"==================================================\n"
                   f"==================================================\n"
-                  f"An error has occured in subject {s}! The exception is:\n\n{str(e)}\n\n"
+                  f"An error has occurred in subject {s}! The exception is:\n\n{str(e)}\n\n"
                   f"==================================================\n"
                   f"==================================================\n")

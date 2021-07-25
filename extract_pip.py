@@ -16,7 +16,6 @@ from sys import stderr
 
 # %% functions
 
-
 def load_data_clean(subject_number) -> mne.io.Raw:
     """
     Loads the clean data given the subject number. Assumes the data is in the same folder as the code
@@ -91,7 +90,7 @@ def get_trial_pip_score(args) -> Tuple[np.array, np.array, np.array, np.array, n
     epoch_vec[trial_num] = False
     train_x, train_y = epochs_data[epoch_vec, ...], labels[epoch_vec]
     test_x, test_y = epochs_data[~epoch_vec, ...], labels[~epoch_vec]
-    probs = np.zeros((epochs_data.shape[2], 2))
+    probs = np.zeros((epochs_data.shape[2], 2), dtype=np.float32)
     # create classifier for each timepoint
     for timepoint in range(epochs_data.shape[2]):
         lda.fit(train_x[:, :, timepoint], train_y)
@@ -109,7 +108,7 @@ def prepare_data_for_pip_scoring(epochs):
     :param epochs: The epochs to prepare
     :return:
     """
-    epochs_data = epochs.get_data('eeg')
+    epochs_data = epochs.get_data('eeg').astype(np.float32)
     epochs_vec = np.ones(epochs_data.shape[0], dtype=bool)
     zero_idx = np.where(epochs.times == 0)[0].item()
     min_time = 0.1
@@ -184,9 +183,9 @@ def plot_pip_rt_regression(df, type_list):
 
 # %% prepare data for pip extraction
 if __name__ == "__main__":
-    subjects = [331, 332, 333, 334, 335, 336, 337, 338, 339, 342, 343, 344, 345, 346, 347, 349, 349]
-    #subjects = [332]
-    failed_subject =[]
+    # subjects = [331, 332, 333, 334, 335, 336, 337, 338, 339, 342, 343, 344, 345, 346, 347, 349, 349]
+    subjects = [338, 343, 346, 347, 349]
+    failed_subject = []
     for s in subjects:
         try:
             print(f"Reading data for subject {s}...")

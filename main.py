@@ -30,6 +30,13 @@ average_decoding_congruency = []
 subject_TOI = []  # add timepoints from which we will extract the PIP
 subjects = [331, 332, 333, 334, 335, 336,337,339,342,344,345,346,347,349]
 failed_subject=[]
+
+freqs = np.arange(2, 45, 1)  # frequencies from 2-35Hz
+n_cycles = freqs  # use constant t/f resolution
+# vmin, vmax = -1, 1.5  # set min and max ERDS values in plot
+baseline = [-.4, 1]  # baseline interval (in s)
+
+
 for s in subjects:
     try:
         raw = load_data_clean(s)
@@ -72,6 +79,8 @@ for s in subjects:
         labels[ll_trials] = 1
         epochs_prime_lc = epochs_prime[(labels == 0) | (labels == 1)]
         labels_lc = labels[(labels == 0) | (labels == 1)]
+
+
         scores_lc = mne.decoding.cross_val_multiscore(estimator=time_decoding, X=epochs_prime_lc.get_data('eeg'),
                                                       y=labels_lc, cv=kfold)
         scores_lc = np.mean(scores_lc, axis=0)

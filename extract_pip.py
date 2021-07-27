@@ -16,6 +16,7 @@ from sys import stderr
 
 # %% functions
 
+
 def load_data_clean(subject_number) -> mne.io.Raw:
     """
     Loads the clean data given the subject number. Assumes the data is in the same folder as the code
@@ -181,10 +182,39 @@ def plot_pip_rt_regression(df, type_list):
     fig.tight_layout()
 
 
+def get_frequency_features(epochs):
+    freqs = dict(theta=[4, 8],
+                 alpha=[8, 12],
+                 beta=[12, 30],
+                 gamma=[30, 45])
+    tfr = mne.time_frequency.psd_multitaper(epochs.copy().crop(epochs.times[0],0), fmax=125, n_jobs=12, picks='eeg')
+    power_per_ch_dict = {}
+    for k in freqs.keys():
+        curr_power = tfr[0][:, :, (tfr[1] > freqs[k][0]) & (tfr[1] < freqs[k][1])].mean(
+            axis=2)  # get average power in each trial and channel for the requested frequency
+        for ch_idx in range(len(epochs.ch_names[:64])):
+            power_per_ch_dict[k + '_' + epochs.ch_names[ch_idx]] = curr_power[:, ch_idx]
+    return pd.DataFrame(power_per_ch_dict)
+
+
+def get_binned_data(epochs,bin_dur=10):
+    dat = epochs.copy().crop(epochs.times[0],0).get_data('eeg')
+    bin_start=np.arange(epochs.times[0],0,bin_dur/1000)*epochs.info['sfreq']
+    bin_start-=bin_start[0]
+    bin_start=np.array(bin_start,dtype=int)
+    dat_mov_avg = np.array([dat[:,:,bin_start[curr_t]:bin_start[curr_t+1]].mean(axis=2) for curr_t in range(len(bin_start)-1)])
+    # dat_mov_avg = np.swapaxes(np.swapaxes(dat_mov_avg,1,0),2,1)
+    binned_df = {}
+    for k in range(len(bin_start)-1):
+        for ch_idx in range(len(epochs.ch_names[:64])):
+            binned_df[epochs.ch_names[ch_idx]+'_bin_'+str(k)] = dat_mov_avg[k,:,ch_idx]-np.mean(dat_mov_avg[k,:,ch_idx])
+    return pd.DataFrame(binned_df)
+
+
 # %% prepare data for pip extraction
 if __name__ == "__main__":
-    # subjects = [331, 332, 333, 334, 335, 336, 337, 338, 339, 342, 343, 344, 345, 346, 347, 349, 349]
-    subjects = [338, 343, 346, 347, 349]
+    subjects = [331, 332, 333, 334, 335, 336, 337, 339, 342, 343, 344, 345, 346, 347, 349, 349]
+    subjects = [339]
     failed_subject = []
     for s in subjects:
         try:
@@ -233,6 +263,8 @@ if __name__ == "__main__":
             df['mean_pip'] = np.hstack([lc_pip_scores[:, 2], rc_pip_scores[:, 2]])
             df['median_pip'] = np.hstack([lc_pip_scores[:, 3], rc_pip_scores[:, 3]])
             # plot regression
+            df = pd.concat([df, get_frequency_features(mne.concatenate_epochs([prime_epochs_lc, prime_epochs_rc]))],
+                           axis=1)
             plot_pip_rt_regression(df, ["median_ratio", "mean_ratio", "median", "mean"])
             plt.savefig(f"S{s}_pip_rt_reg.png")
             df.to_csv(f"S{s}_df.csv")

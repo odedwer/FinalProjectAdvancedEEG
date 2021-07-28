@@ -41,7 +41,7 @@ def get_prime_epochs(raw, events, tmin=-.4, tmax=1.1, baseline=(-.4, -.1)) -> mn
     Extract epochs around the prime
     :return:
     """
-    event_dict = {"prime_R": 12, "prime_L": 11}
+    event_dict = {"prime_R": 12, "prime_L": 11, "prime_R_N": 22, "prime_L_N": 21}
     return mne.Epochs(raw, events, event_dict, tmin=tmin, tmax=tmax, baseline=baseline,
                       preload=True)  # , reject={'eeg': 400e-6})
 
@@ -51,13 +51,13 @@ def get_cue_epochs(raw, events, tmin=-.4, tmax=1.1, baseline=(-.4, -.1)):
     Extract epochs around the cue
     :return:
     """
-    event_dict = {"cue_R_reg": 112, "cue_L_reg": 111}
+    event_dict = {"cue_R_reg": 112, "cue_L_reg": 111, "cue_N": 123}
     return mne.Epochs(raw, events, event_dict, tmin=tmin, tmax=tmax, baseline=baseline,
                       preload=True)  # , reject={'eeg': 400e-6})
 
 
 def get_prime_cue_combination_trials(cue_epochs: mne.Epochs, prime_epochs: mne.Epochs) -> Tuple[
-    np.array, np.array, np.array, np.array]:
+    np.array, np.array, np.array, np.array, np.array, np.array]:
     """
     To avoid using cue information in prime decoding, we need to split to left
     (right) cue trials, and tag each trial with the correct prime identity
@@ -69,10 +69,12 @@ def get_prime_cue_combination_trials(cue_epochs: mne.Epochs, prime_epochs: mne.E
     ll_trials = (cue_epochs.events[:, 2] == 111) & (prime_epochs.events[:, 2] == 11)
     rl_trials = (cue_epochs.events[:, 2] == 111) & (prime_epochs.events[:, 2] == 12)
     lr_trials = (cue_epochs.events[:, 2] == 112) & (prime_epochs.events[:, 2] == 11)
-    return rr_trials, ll_trials, rl_trials, lr_trials
+    rn_trials = (cue_epochs.events[:, 2] == 123) & (prime_epochs.events[:, 2] == 22)
+    ln_trials = (cue_epochs.events[:, 2] == 123) & (prime_epochs.events[:, 2] == 21)
+    return rr_trials, ll_trials, rl_trials, lr_trials, rn_trials, ln_trials
 
 
-def get_trial_pip_score(args) -> Tuple[np.array, np.array, np.array, np.array, np.array]:
+def get_trial_pip_score_sliding(args) -> Tuple[np.array, np.array, np.array, np.array, np.array]:
     """
     Calculate the pip score for a specific trial.
     Compatible with multiprocessing.Pool.map function
@@ -87,15 +89,22 @@ def get_trial_pip_score(args) -> Tuple[np.array, np.array, np.array, np.array, n
     :return: Variants of the pip score and probability ratio over timepoints
     """
     epochs_data, labels, epoch_vec, trial_num = args
+    wanted_n_windows = 10
+    winsize = epochs_data.shape[2] // wanted_n_windows
     lda = LinearDiscriminantAnalysis()
     epoch_vec[trial_num] = False
     train_x, train_y = epochs_data[epoch_vec, ...], labels[epoch_vec]
     test_x, test_y = epochs_data[~epoch_vec, ...], labels[~epoch_vec]
-    probs = np.zeros((epochs_data.shape[2], 2), dtype=np.float32)
+    n_windows = np.ceil(epochs_data.shape[2] / winsize).astype(int)
+    probs = np.zeros((n_windows, 2), dtype=np.float32)
     # create classifier for each timepoint
-    for timepoint in range(epochs_data.shape[2]):
-        lda.fit(train_x[:, :, timepoint], train_y)
-        probs[timepoint, :] = lda.predict_proba(test_x[:, :, timepoint])
+    for win_idx in range(wanted_n_windows):
+        cur_train_win = train_x[:, :, win_idx * winsize:((win_idx + 1) * winsize)]
+        cur_test_win = test_x[:, :, win_idx * winsize:((win_idx + 1) * winsize)]
+        cur_train_x = cur_train_win.reshape((cur_train_win.shape[0], cur_train_win.shape[1] * cur_train_win.shape[2]))
+        cur_test_x = cur_test_win.reshape((cur_test_win.shape[0], cur_test_win.shape[1] * cur_test_win.shape[2]))
+        lda.fit(cur_train_x, train_y)
+        probs[win_idx, :] = lda.predict_proba(cur_test_x)
     probs_ratio = probs[:, test_y] / probs[:, 1 - test_y]  # correct / incorrect
     # reset the boolean vector
     epoch_vec[trial_num] = True
@@ -139,26 +148,31 @@ def get_condition_prime_epochs_and_labels(prime_epochs: mne.Epochs, cong_trials:
     return prime_epochs_c, labels_c
 
 
-def get_behavioral_df(s, raw, events, prime_epochs_lc, prime_epochs_rc):
+def get_behavioral_df(s, raw, events, prime_epochs_lc, prime_epochs_rc, prime_epochs_nc):
     # calculate RT
     lc_rt = raw.times[events[prime_epochs_lc.selection + 2, 0]] - raw.times[events[prime_epochs_lc.selection + 1, 0]]
     rc_rt = raw.times[events[prime_epochs_rc.selection + 2, 0]] - raw.times[events[prime_epochs_rc.selection + 1, 0]]
+    nc_rt = raw.times[events[prime_epochs_nc.selection + 2, 0]] - raw.times[events[prime_epochs_nc.selection + 1, 0]]
+
     # pre-allocate the rows and columns
-    df = pd.DataFrame(np.zeros((lc_rt.size + rc_rt.size, 11)),
+    df = pd.DataFrame(np.zeros((lc_rt.size + rc_rt.size + nc_rt.size, 11)),
                       columns=['subject', 'prime', 'cue', 'choice', 'congruent', 'is_correct', 'RT', 'mean_ratio_pip',
                                'median_ratio_pip', 'mean_pip', 'median_pip'])
     # fill data
     df['subject'] = s
     # prime_epochs_lc.selection contains the indices in the events array for the epochs used after rejection
-    df['prime'] = np.hstack([events[prime_epochs_lc.selection, 2], events[prime_epochs_rc.selection, 2]])
-    df['prime'].replace({12: "r", 11: "l"}, inplace=True)
-    df['cue'] = np.hstack([events[prime_epochs_lc.selection + 1, 2], events[prime_epochs_rc.selection + 1, 2]])
-    df['cue'].replace({112: "r", 111: "l"}, inplace=True)
-    df['choice'] = np.hstack([events[prime_epochs_lc.selection + 2, 2], events[prime_epochs_rc.selection + 2, 2]])
-    df['choice'].replace({212: "r", 211: "l"}, inplace=True)
+    df['prime'] = np.hstack([events[prime_epochs_lc.selection, 2], events[prime_epochs_rc.selection, 2],
+                             events[prime_epochs_nc.selection, 2]])
+    df['prime'].replace({12: "r", 11: "l", 22: "r", 21: "l"}, inplace=True)
+    df['cue'] = np.hstack([events[prime_epochs_lc.selection + 1, 2], events[prime_epochs_rc.selection + 1, 2],
+                           events[prime_epochs_nc.selection + 1, 2]])
+    df['cue'].replace({112: "r", 111: "l", 123: "fc"}, inplace=True)
+    df['choice'] = np.hstack([events[prime_epochs_lc.selection + 2, 2], events[prime_epochs_rc.selection + 2, 2],
+                              events[prime_epochs_nc.selection + 2, 2]])
+    df['choice'].replace({212: "r", 211: "l", 222: "r", 221: "l"}, inplace=True)
     df['congruent'] = (df['prime'] == df['cue']).astype(int)
     df['is_correct'] = (df['cue'] == df['choice']).astype(int)
-    df['RT'] = np.hstack([lc_rt, rc_rt])
+    df['RT'] = np.hstack([lc_rt, rc_rt, nc_rt])
     return df
 
 
@@ -253,27 +267,21 @@ def get_filtered_data(epochs, freq=10):
                 dat[:, ch_idx,k])
     return pd.DataFrame(binned_df)
 
-#
-# bands = [(4, 8, 'Theta'), (8, 12, 'Alpha'),
-#          (18, 25, 'Beta')]
-#
-# cue_epochs['cue_R_reg'].copy().crop(tmin=0.0,tmax=0.8).plot_psd_topomap(bands=bands)
-# cue_epochs['cue_L_reg'].copy().crop(tmin=0.0,tmax=0.8).plot_psd_topomap(bands=bands)
-#
-# tfr_r = mne.time_frequency.tfr_multitaper(cue_epochs['cue_R_reg'].copy().crop(tmin=-.5,tmax=1),freqs=np.arange(10,40),
-#                                   n_cycles=4,time_bandwidth=2,n_jobs=12,picks='eeg')
-#
-#
-# tfr_l = mne.time_frequency.tfr_multitaper(cue_epochs['cue_L_reg'].copy().crop(tmin=-.5,tmax=1),freqs=np.arange(10,40),
-#                                   n_cycles=4,time_bandwidth=2,n_jobs=12,picks='eeg')
-#
-# tfr_r[0].plot_topo(baseline=(-.5,-.05),vmax=1e-10,vmin=-1e-10)
-# tfr_l[0].plot_topo(baseline=(-.5,-.05),vmax=1e-10,vmin=-1e-10)
+
+def calculate_pip_scores(data, num):
+    global pool
+    lc_pip_scores = []
+    lc_pip_probs = []
+    for res in tqdm(pool.imap(get_trial_pip_score, data), total=num):
+        lc_pip_scores.append(res[:4])
+        lc_pip_probs.append(res[-1])
+    return np.array(lc_pip_scores), np.squeeze(np.array(lc_pip_probs))
+
 
 # %% prepare data for pip extraction
 if __name__ == "__main__":
     subjects = [331, 332, 333, 334, 335, 336, 337, 339, 342, 343, 344, 345, 346, 347, 349, 349]
-    subjects = [336]
+    subjects = [339]
     failed_subject = []
     for s in subjects:
         try:
@@ -286,57 +294,49 @@ if __name__ == "__main__":
             prime_epochs = get_prime_epochs(raw, events)
             cue_epochs = get_cue_epochs(raw, events)
 
-            rr_trials, ll_trials, rl_trials, lr_trials = get_prime_cue_combination_trials(cue_epochs, prime_epochs)
+            rr_trials, ll_trials, rl_trials, lr_trials, rn_trials, ln_trials = get_prime_cue_combination_trials(
+                cue_epochs, prime_epochs)
             # extract epochs for trials where the cue was left/right
             prime_epochs_lc, labels_lc = get_condition_prime_epochs_and_labels(prime_epochs, ll_trials,
                                                                                rl_trials)  # type: mne.Epochs,np.array
             prime_epochs_rc, labels_rc = get_condition_prime_epochs_and_labels(prime_epochs, rr_trials, lr_trials)
-
+            prime_epochs_nc, labels_nc = get_condition_prime_epochs_and_labels(prime_epochs, rn_trials, ln_trials)
             epochs_data_lc, epoch_vec_lc = prepare_data_for_pip_scoring(prime_epochs_lc)
             epochs_data_rc, epoch_vec_rc = prepare_data_for_pip_scoring(prime_epochs_rc)
+            epochs_data_nc, epoch_vec_nc = prepare_data_for_pip_scoring(prime_epochs_nc)
             pool = mp.Pool()
             lc_pool_data = [(epochs_data_lc, labels_lc, epoch_vec_lc, i) for i in range(epochs_data_lc.shape[0])]
             rc_pool_data = [(epochs_data_rc, labels_rc, epoch_vec_rc, i) for i in range(epochs_data_rc.shape[0])]
-            print("Calculating left condition scores...")
-            lc_pip_scores = []
-            lc_pip_probs = []
-            for res in tqdm(pool.imap(get_trial_pip_score, lc_pool_data), total=epochs_data_lc.shape[0]):
-                lc_pip_scores.append(res[:4])
-                lc_pip_probs.append(res[-1])
-            lc_pip_scores = np.array(lc_pip_scores)
-            lc_pip_probs: np.array = np.squeeze(np.array(lc_pip_probs))
-            print("Calculating right condition scores...")
-            rc_pip_scores = []
-            rc_pip_probs = []
-            for res in tqdm(pool.imap(get_trial_pip_score, rc_pool_data), total=epochs_data_rc.shape[0]):
-                rc_pip_scores.append(res[:4])
-                rc_pip_probs.append(res[-1])
-            rc_pip_scores = np.array(rc_pip_scores)
-            rc_pip_probs: np.array = np.squeeze(np.array(rc_pip_probs))
+            nc_pool_data = [(epochs_data_nc, labels_nc, epoch_vec_nc, i) for i in range(epochs_data_nc.shape[0])]
 
+            print("Calculating left condition scores...")
+            lc_pip_scores, lc_pip_probs = calculate_pip_scores(lc_pool_data, epochs_data_lc.shape[0])
+            print("Calculating right condition scores...")
+            rc_pip_scores, rc_pip_probs = calculate_pip_scores(rc_pool_data, epochs_data_rc.shape[0])
+            print("Calculating free choice condition scores...")
+            nc_pip_scores, nc_pip_probs = calculate_pip_scores(nc_pool_data, epochs_data_nc.shape[0])
             # extract the behavioral data
-            df = get_behavioral_df(s, raw, events, prime_epochs_lc, prime_epochs_rc)
+            df = get_behavioral_df(s, raw, events, prime_epochs_lc, prime_epochs_rc, prime_epochs_nc)
             # add the pip scores
-            df['mean_ratio_pip'] = np.hstack([lc_pip_scores[:, 0], rc_pip_scores[:, 0]])
-            df['median_ratio_pip'] = np.hstack([lc_pip_scores[:, 1], rc_pip_scores[:, 1]])
-            df['mean_pip'] = np.hstack([lc_pip_scores[:, 2], rc_pip_scores[:, 2]])
-            df['median_pip'] = np.hstack([lc_pip_scores[:, 3], rc_pip_scores[:, 3]])
-            # df['beta_lateralization'] = get_beta_during_trial(mne.concatenate_epochs([prime_epochs_lc, prime_epochs_rc]))
+            df['mean_ratio_pip'] = np.hstack([lc_pip_scores[:, 0], rc_pip_scores[:, 0], nc_pip_scores[:, 0]])
+            df['median_ratio_pip'] = np.hstack([lc_pip_scores[:, 1], rc_pip_scores[:, 1], nc_pip_scores[:, 1]])
+            df['mean_pip'] = np.hstack([lc_pip_scores[:, 2], rc_pip_scores[:, 2], nc_pip_scores[:, 2]])
+            df['median_pip'] = np.hstack([lc_pip_scores[:, 3], rc_pip_scores[:, 3], nc_pip_scores[:, 3]])
             # plot regression
-            df = pd.concat([df, get_exponent(mne.concatenate_epochs([prime_epochs_lc, prime_epochs_rc]))],
+            df = pd.concat([df, get_frequency_features(
+                mne.concatenate_epochs([prime_epochs_lc, prime_epochs_rc, prime_epochs_nc]))],
                            axis=1)
             plot_pip_rt_regression(df, ["median_ratio", "mean_ratio", "median", "mean"])
             plt.savefig(f"S{s}_pip_rt_reg.png")
             df.to_csv(f"S{s}_df.csv")
             np.save(f"S{s}_lc_prob_ratios.npy", lc_pip_probs)
             np.save(f"S{s}_rc_prob_ratios.npy", rc_pip_probs)
+            np.save(f"S{s}_rc_prob_ratios.npy", nc_pip_probs)
         except Exception as e:
             failed_subject.append(s)
             print(f"==================================================\n"
                   f"==================================================\n"
                   f"An error has occurred in subject {s}! The exception is:\n\n{str(e)}\n\n"
                   f"==================================================\n"
-                  f"==================================================\n")
+                  f"==================================================\n", file=stderr)
     print(failed_subject)
-
-#%%

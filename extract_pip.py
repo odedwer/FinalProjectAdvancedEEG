@@ -74,37 +74,6 @@ def get_prime_cue_combination_trials(cue_epochs: mne.Epochs, prime_epochs: mne.E
     return rr_trials, ll_trials, rl_trials, lr_trials, rn_trials, ln_trials
 
 
-def get_trial_pip_score(args) -> Tuple[np.array, np.array, np.array, np.array, np.array]:
-    """
-    Calculate the pip score for a specific trial.
-    Compatible with multiprocessing.Pool.map function
-    :param args: Should contain:
-        * epochs_data - np.array of shape (n_trials, n_electrodes, n_timepoints)
-            containing the electrode voltages
-        * labels - np.array of shape (n_trials,)
-            containing the labels of the trials (0-incongruent, 1-congruent)
-        * epoch_vec - np.array of shape (n_trials,)
-            with all True values, is used for splitting to test and train
-        * trial_num - the number of the trial to calculate PIP score for
-    :return: Variants of the pip score and probability ratio over timepoints
-    """
-    epochs_data, labels, epoch_vec, trial_num = args
-    lda = LinearDiscriminantAnalysis()
-    epoch_vec[trial_num] = False
-    train_x, train_y = epochs_data[epoch_vec, ...], labels[epoch_vec]
-    test_x, test_y = epochs_data[~epoch_vec, ...], labels[~epoch_vec]
-    probs = np.zeros((epochs_data.shape[2], 2), dtype=np.float32)
-    # create classifier for each timepoint
-    for timepoint in range(epochs_data.shape[2]):
-        lda.fit(train_x[:, :, timepoint], train_y)
-        probs[timepoint, :] = lda.predict_proba(test_x[:, :, timepoint])
-    probs_ratio = probs[:, test_y] / probs[:, 1 - test_y]  # correct / incorrect
-    # reset the boolean vector
-    epoch_vec[trial_num] = True
-    return np.mean(probs_ratio), np.median(probs_ratio), np.mean(probs[:, test_y]), np.median(
-        probs[:, test_y]), probs_ratio
-
-
 def get_trial_pip_score_sliding(args) -> Tuple[np.array, np.array, np.array, np.array, np.array]:
     """
     Calculate the pip score for a specific trial.
@@ -120,7 +89,8 @@ def get_trial_pip_score_sliding(args) -> Tuple[np.array, np.array, np.array, np.
     :return: Variants of the pip score and probability ratio over timepoints
     """
     epochs_data, labels, epoch_vec, trial_num = args
-    winsize = epochs_data.shape[2] // 10
+    wanted_n_windows = 10
+    winsize = epochs_data.shape[2] // wanted_n_windows
     lda = LinearDiscriminantAnalysis()
     epoch_vec[trial_num] = False
     train_x, train_y = epochs_data[epoch_vec, ...], labels[epoch_vec]
@@ -128,9 +98,13 @@ def get_trial_pip_score_sliding(args) -> Tuple[np.array, np.array, np.array, np.
     n_windows = np.ceil(epochs_data.shape[2] / winsize).astype(int)
     probs = np.zeros((n_windows, 2), dtype=np.float32)
     # create classifier for each timepoint
-    for timepoint in range(epochs_data.shape[2]):
-        lda.fit(train_x[:, :, timepoint], train_y)
-        probs[timepoint, :] = lda.predict_proba(test_x[:, :, timepoint])
+    for win_idx in range(wanted_n_windows):
+        cur_train_win = train_x[:, :, win_idx * winsize:((win_idx + 1) * winsize)]
+        cur_test_win = test_x[:, :, win_idx * winsize:((win_idx + 1) * winsize)]
+        cur_train_x = cur_train_win.reshape((cur_train_win.shape[0], cur_train_win.shape[1] * cur_train_win.shape[2]))
+        cur_test_x = cur_test_win.reshape((cur_test_win.shape[0], cur_test_win.shape[1] * cur_test_win.shape[2]))
+        lda.fit(cur_train_x, train_y)
+        probs[win_idx, :] = lda.predict_proba(cur_test_x)
     probs_ratio = probs[:, test_y] / probs[:, 1 - test_y]  # correct / incorrect
     # reset the boolean vector
     epoch_vec[trial_num] = True
@@ -305,8 +279,8 @@ if __name__ == "__main__":
             # add the pip scores
             df['mean_ratio_pip'] = np.hstack([lc_pip_scores[:, 0], rc_pip_scores[:, 0], nc_pip_scores[:, 0]])
             df['median_ratio_pip'] = np.hstack([lc_pip_scores[:, 1], rc_pip_scores[:, 1], nc_pip_scores[:, 1]])
-            df['mean_pip'] = np.hstack([lc_pip_scores[:, 2], rc_pip_scores[:, 2],nc_pip_scores[:, 2]])
-            df['median_pip'] = np.hstack([lc_pip_scores[:, 3], rc_pip_scores[:, 3],nc_pip_scores[:, 3]])
+            df['mean_pip'] = np.hstack([lc_pip_scores[:, 2], rc_pip_scores[:, 2], nc_pip_scores[:, 2]])
+            df['median_pip'] = np.hstack([lc_pip_scores[:, 3], rc_pip_scores[:, 3], nc_pip_scores[:, 3]])
             # plot regression
             df = pd.concat([df, get_frequency_features(
                 mne.concatenate_epochs([prime_epochs_lc, prime_epochs_rc, prime_epochs_nc]))],
@@ -325,3 +299,34 @@ if __name__ == "__main__":
                   f"==================================================\n"
                   f"==================================================\n", file=stderr)
     print(failed_subject)
+
+
+def get_trial_pip_score(args) -> Tuple[np.array, np.array, np.array, np.array, np.array]:
+    """
+    Calculate the pip score for a specific trial.
+    Compatible with multiprocessing.Pool.map function
+    :param args: Should contain:
+        * epochs_data - np.array of shape (n_trials, n_electrodes, n_timepoints)
+            containing the electrode voltages
+        * labels - np.array of shape (n_trials,)
+            containing the labels of the trials (0-incongruent, 1-congruent)
+        * epoch_vec - np.array of shape (n_trials,)
+            with all True values, is used for splitting to test and train
+        * trial_num - the number of the trial to calculate PIP score for
+    :return: Variants of the pip score and probability ratio over timepoints
+    """
+    epochs_data, labels, epoch_vec, trial_num = args
+    lda = LinearDiscriminantAnalysis()
+    epoch_vec[trial_num] = False
+    train_x, train_y = epochs_data[epoch_vec, ...], labels[epoch_vec]
+    test_x, test_y = epochs_data[~epoch_vec, ...], labels[~epoch_vec]
+    probs = np.zeros((epochs_data.shape[2], 2), dtype=np.float32)
+    # create classifier for each timepoint
+    for timepoint in range(epochs_data.shape[2]):
+        lda.fit(train_x[:, :, timepoint], train_y)
+        probs[timepoint, :] = lda.predict_proba(test_x[:, :, timepoint])
+    probs_ratio = probs[:, test_y] / (probs[:, 1 - test_y] + 1e-15)  # correct / incorrect
+    # reset the boolean vector
+    epoch_vec[trial_num] = True
+    return np.mean(probs_ratio), np.median(probs_ratio), np.mean(probs[:, test_y]), np.median(
+        probs[:, test_y]), probs_ratio

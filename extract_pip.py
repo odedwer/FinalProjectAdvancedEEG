@@ -187,7 +187,7 @@ def get_frequency_features(epochs):
                  alpha=[8, 12],
                  beta=[12, 30],
                  gamma=[30, 45])
-    tfr = mne.time_frequency.psd_multitaper(epochs.copy().crop(epochs.times[0],0), fmax=125, n_jobs=12, picks='eeg')
+    tfr = mne.time_frequency.psd_multitaper(epochs.copy().crop(epochs.times[0], 0), fmax=125, n_jobs=12, picks='eeg')
     power_per_ch_dict = {}
     for k in freqs.keys():
         curr_power = tfr[0][:, :, (tfr[1] > freqs[k][0]) & (tfr[1] < freqs[k][1])].mean(
@@ -196,25 +196,84 @@ def get_frequency_features(epochs):
             power_per_ch_dict[k + '_' + epochs.ch_names[ch_idx]] = curr_power[:, ch_idx]
     return pd.DataFrame(power_per_ch_dict)
 
+def get_beta_during_trial(epochs):
+    freqs = dict(beta=[12, 30])
+    tfr = mne.time_frequency.psd_multitaper(epochs.copy().crop(.1, .6), fmax=125, n_jobs=12, picks='eeg')
+    power_per_ch_dict = {}
+    for k in freqs.keys():
+        curr_power = tfr[0][:, :, (tfr[1] > freqs[k][0]) & (tfr[1] < freqs[k][1])].mean(
+            axis=2)  # get average power in each trial and channel for the requested frequency
+        for ch_idx in range(len(epochs.ch_names[:64])):
+            power_per_ch_dict[k + '_' + epochs.ch_names[ch_idx]] = (-1*channel_left[ch_idx])*curr_power[:, ch_idx]
 
-def get_binned_data(epochs,bin_dur=10):
-    dat = epochs.copy().crop(epochs.times[0],0).get_data('eeg')
-    bin_start=np.arange(epochs.times[0],0,bin_dur/1000)*epochs.info['sfreq']
-    bin_start-=bin_start[0]
-    bin_start=np.array(bin_start,dtype=int)
-    dat_mov_avg = np.array([dat[:,:,bin_start[curr_t]:bin_start[curr_t+1]].mean(axis=2) for curr_t in range(len(bin_start)-1)])
+    return pd.DataFrame(power_per_ch_dict)
+
+
+def get_exponent(epochs):
+    import fooof as f
+    fg = f.FOOOFGroup(peak_width_limits=[1, 8], min_peak_height=0.02, max_n_peaks=8)
+    psd = mne.time_frequency.psd_welch(epochs.copy().crop(epochs.times[0], 0), n_fft=1400, n_per_seg=450, n_overlap=20,
+                                       fmax=125, n_jobs=12, picks='eeg')
+    slope_per_ch_dict = {}
+    curr_power = (psd[0][:, :, (psd[1] > 2) & (psd[1] < 100)])
+    curr_freqs = (psd[1][(psd[1] > 2) & (psd[1] < 100)])
+    for i in tqdm(range(len(curr_power))):
+        fg.fit(curr_freqs, curr_power[i], [1, 115], n_jobs=12)
+        curr_exps = fg.get_params('aperiodic_params','exponent')
+        for ch_idx in range(len(epochs.ch_names[:64])):
+            slope_per_ch_dict['slope_' + epochs.ch_names[ch_idx]] = curr_exps[ch_idx]
+
+    return pd.DataFrame(slope_per_ch_dict)
+
+
+def get_binned_data(epochs, bin_dur=10):
+    dat = epochs.copy().crop(epochs.times[0], 0).get_data('eeg')
+    bin_start = np.arange(epochs.times[0], 0, bin_dur / 1000) * epochs.info['sfreq']
+    bin_start -= bin_start[0]
+    bin_start = np.array(bin_start, dtype=int)
+    dat_mov_avg = np.array(
+        [dat[:, :, bin_start[curr_t]:bin_start[curr_t + 1]].mean(axis=2) for curr_t in range(len(bin_start) - 1)])
     # dat_mov_avg = np.swapaxes(np.swapaxes(dat_mov_avg,1,0),2,1)
     binned_df = {}
-    for k in range(len(bin_start)-1):
+    for k in range(len(bin_start) - 1):
         for ch_idx in range(len(epochs.ch_names[:64])):
-            binned_df[epochs.ch_names[ch_idx]+'_bin_'+str(k)] = dat_mov_avg[k,:,ch_idx]-np.mean(dat_mov_avg[k,:,ch_idx])
+            binned_df[epochs.ch_names[ch_idx] + '_bin_' + str(k)] = dat_mov_avg[k, :, ch_idx] - np.mean(
+                dat_mov_avg[k, :, ch_idx])
     return pd.DataFrame(binned_df)
 
+
+def get_filtered_data(epochs, freq=10):
+    epochs = epochs.filter(l_freq=freq - 1.5, h_freq=freq + 1.5)
+    dat = epochs.copy().crop(-.125, 0).get_data('eeg')
+    dat = dat[:,:,::15]
+    binned_df = {}
+    for k in range(dat.shape[2] - 1):
+        for ch_idx in range(dat.shape[1]):
+            binned_df[epochs.ch_names[ch_idx] + '_bin_' + str(k)] = dat[:, ch_idx,k] - np.mean(
+                dat[:, ch_idx,k])
+    return pd.DataFrame(binned_df)
+
+#
+# bands = [(4, 8, 'Theta'), (8, 12, 'Alpha'),
+#          (18, 25, 'Beta')]
+#
+# cue_epochs['cue_R_reg'].copy().crop(tmin=0.0,tmax=0.8).plot_psd_topomap(bands=bands)
+# cue_epochs['cue_L_reg'].copy().crop(tmin=0.0,tmax=0.8).plot_psd_topomap(bands=bands)
+#
+# tfr_r = mne.time_frequency.tfr_multitaper(cue_epochs['cue_R_reg'].copy().crop(tmin=-.5,tmax=1),freqs=np.arange(10,40),
+#                                   n_cycles=4,time_bandwidth=2,n_jobs=12,picks='eeg')
+#
+#
+# tfr_l = mne.time_frequency.tfr_multitaper(cue_epochs['cue_L_reg'].copy().crop(tmin=-.5,tmax=1),freqs=np.arange(10,40),
+#                                   n_cycles=4,time_bandwidth=2,n_jobs=12,picks='eeg')
+#
+# tfr_r[0].plot_topo(baseline=(-.5,-.05),vmax=1e-10,vmin=-1e-10)
+# tfr_l[0].plot_topo(baseline=(-.5,-.05),vmax=1e-10,vmin=-1e-10)
 
 # %% prepare data for pip extraction
 if __name__ == "__main__":
     subjects = [331, 332, 333, 334, 335, 336, 337, 339, 342, 343, 344, 345, 346, 347, 349, 349]
-    subjects = [339]
+    subjects = [336]
     failed_subject = []
     for s in subjects:
         try:
@@ -262,8 +321,9 @@ if __name__ == "__main__":
             df['median_ratio_pip'] = np.hstack([lc_pip_scores[:, 1], rc_pip_scores[:, 1]])
             df['mean_pip'] = np.hstack([lc_pip_scores[:, 2], rc_pip_scores[:, 2]])
             df['median_pip'] = np.hstack([lc_pip_scores[:, 3], rc_pip_scores[:, 3]])
+            # df['beta_lateralization'] = get_beta_during_trial(mne.concatenate_epochs([prime_epochs_lc, prime_epochs_rc]))
             # plot regression
-            df = pd.concat([df, get_frequency_features(mne.concatenate_epochs([prime_epochs_lc, prime_epochs_rc]))],
+            df = pd.concat([df, get_exponent(mne.concatenate_epochs([prime_epochs_lc, prime_epochs_rc]))],
                            axis=1)
             plot_pip_rt_regression(df, ["median_ratio", "mean_ratio", "median", "mean"])
             plt.savefig(f"S{s}_pip_rt_reg.png")
@@ -278,3 +338,5 @@ if __name__ == "__main__":
                   f"==================================================\n"
                   f"==================================================\n")
     print(failed_subject)
+
+#%%

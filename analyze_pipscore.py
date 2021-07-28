@@ -11,8 +11,8 @@ from tqdm import tqdm
 
 # %% read data per subject and unify them
 # subjects = [331, 332, 333, 334, 335, 336,337,339,342,344,345,346,347,349]
-subjects = [339]
-all_dfs = pd.concat([pd.read_csv(f"S{s}_df.csv") for s in subjects])
+subjects = [336]
+all_dfs = pd.concat([pd.read_csv(f"S{s}_df_filt.csv") for s in subjects])
 print(all_dfs.groupby('congruent')['is_correct'].mean())
 print(all_dfs.groupby('congruent')['RT'].mean())
 print(all_dfs.groupby(['congruent', 'is_correct', "subject"])['mean_pip'].mean())
@@ -29,14 +29,14 @@ from scipy import stats
 
 # reg_model = linear_model.Lasso(alpha=0.01,max_iter=10000)
 # reg_model = linear_model.RidgeCV(alphas=np.logspace(-5,2,15))
-num_perm = 50
-curr_df = all_dfs[all_dfs['subject'] == 339]
-reg_model = linear_model.LinearRegression()
+num_perm = 500
+curr_df = all_dfs[all_dfs['subject'] == 336]
+reg_model = linear_model.Lasso(alpha=0.001,max_iter=2000)
 X = zscore((np.array(np.array(curr_df)[:, 12:], dtype=float)), axis=0)
-pca = PCA(n_components=20, svd_solver='full')
-pca.fit(X)
-pca.explained_variance_ratio_
-X=zscore(pca.fit_transform(X),axis=0)
+# pca = PCA(n_components=3, svd_solver='full')
+# pca.fit(X)
+# pca.explained_variance_ratio_
+# X=zscore(pca.fit_transform(X),axis=0)
 y = np.array(curr_df['mean_pip'], dtype=float)
 y_perm = np.zeros_like(y)
 cor_val_true = np.zeros(num_perm)

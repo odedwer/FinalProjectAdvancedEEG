@@ -105,6 +105,39 @@ def get_trial_pip_score(args) -> Tuple[np.array, np.array, np.array, np.array, n
         probs[:, test_y]), probs_ratio
 
 
+def get_trial_pip_score_sliding(args) -> Tuple[np.array, np.array, np.array, np.array, np.array]:
+    """
+    Calculate the pip score for a specific trial.
+    Compatible with multiprocessing.Pool.map function
+    :param args: Should contain:
+        * epochs_data - np.array of shape (n_trials, n_electrodes, n_timepoints)
+            containing the electrode voltages
+        * labels - np.array of shape (n_trials,)
+            containing the labels of the trials (0-incongruent, 1-congruent)
+        * epoch_vec - np.array of shape (n_trials,)
+            with all True values, is used for splitting to test and train
+        * trial_num - the number of the trial to calculate PIP score for
+    :return: Variants of the pip score and probability ratio over timepoints
+    """
+    epochs_data, labels, epoch_vec, trial_num = args
+    winsize = epochs_data.shape[2] // 10
+    lda = LinearDiscriminantAnalysis()
+    epoch_vec[trial_num] = False
+    train_x, train_y = epochs_data[epoch_vec, ...], labels[epoch_vec]
+    test_x, test_y = epochs_data[~epoch_vec, ...], labels[~epoch_vec]
+    n_windows = np.ceil(epochs_data.shape[2] / winsize).astype(int)
+    probs = np.zeros((n_windows, 2), dtype=np.float32)
+    # create classifier for each timepoint
+    for timepoint in range(epochs_data.shape[2]):
+        lda.fit(train_x[:, :, timepoint], train_y)
+        probs[timepoint, :] = lda.predict_proba(test_x[:, :, timepoint])
+    probs_ratio = probs[:, test_y] / probs[:, 1 - test_y]  # correct / incorrect
+    # reset the boolean vector
+    epoch_vec[trial_num] = True
+    return np.mean(probs_ratio), np.median(probs_ratio), np.mean(probs[:, test_y]), np.median(
+        probs[:, test_y]), probs_ratio
+
+
 def prepare_data_for_pip_scoring(epochs):
     """
     generate the relevant variables for "get_trial_pip_score" - scale the data, take only the relevant times
@@ -148,7 +181,7 @@ def get_behavioral_df(s, raw, events, prime_epochs_lc, prime_epochs_rc, prime_ep
     nc_rt = raw.times[events[prime_epochs_nc.selection + 2, 0]] - raw.times[events[prime_epochs_nc.selection + 1, 0]]
 
     # pre-allocate the rows and columns
-    df = pd.DataFrame(np.zeros((lc_rt.size + rc_rt.size, 11)),
+    df = pd.DataFrame(np.zeros((lc_rt.size + rc_rt.size + nc_rt.size, 11)),
                       columns=['subject', 'prime', 'cue', 'choice', 'congruent', 'is_correct', 'RT', 'mean_ratio_pip',
                                'median_ratio_pip', 'mean_pip', 'median_pip'])
     # fill data
@@ -232,8 +265,8 @@ def calculate_pip_scores(data, num):
 
 # %% prepare data for pip extraction
 if __name__ == "__main__":
-    subjects = [331, 332, 333, 334, 335, 336, 337, 339, 342, 343, 344, 345, 346, 347, 349, 349]
-    subjects = [339]
+    # subjects = [331, 332, 333, 334, 335, 336, 337, 339, 342, 343, 344, 345, 346, 347, 349, 349]
+    subjects = [332]
     failed_subject = []
     for s in subjects:
         try:
@@ -268,12 +301,12 @@ if __name__ == "__main__":
             print("Calculating free choice condition scores...")
             nc_pip_scores, nc_pip_probs = calculate_pip_scores(nc_pool_data, epochs_data_nc.shape[0])
             # extract the behavioral data
-            df = get_behavioral_df(s, raw, events, prime_epochs_lc, prime_epochs_rc)
+            df = get_behavioral_df(s, raw, events, prime_epochs_lc, prime_epochs_rc, prime_epochs_nc)
             # add the pip scores
-            df['mean_ratio_pip'] = np.hstack([lc_pip_scores[:, 0], rc_pip_scores[:, 0]])
-            df['median_ratio_pip'] = np.hstack([lc_pip_scores[:, 1], rc_pip_scores[:, 1]])
-            df['mean_pip'] = np.hstack([lc_pip_scores[:, 2], rc_pip_scores[:, 2]])
-            df['median_pip'] = np.hstack([lc_pip_scores[:, 3], rc_pip_scores[:, 3]])
+            df['mean_ratio_pip'] = np.hstack([lc_pip_scores[:, 0], rc_pip_scores[:, 0], nc_pip_scores[:, 0]])
+            df['median_ratio_pip'] = np.hstack([lc_pip_scores[:, 1], rc_pip_scores[:, 1], nc_pip_scores[:, 1]])
+            df['mean_pip'] = np.hstack([lc_pip_scores[:, 2], rc_pip_scores[:, 2],nc_pip_scores[:, 2]])
+            df['median_pip'] = np.hstack([lc_pip_scores[:, 3], rc_pip_scores[:, 3],nc_pip_scores[:, 3]])
             # plot regression
             df = pd.concat([df, get_frequency_features(
                 mne.concatenate_epochs([prime_epochs_lc, prime_epochs_rc, prime_epochs_nc]))],

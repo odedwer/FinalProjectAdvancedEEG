@@ -74,6 +74,37 @@ def get_prime_cue_combination_trials(cue_epochs: mne.Epochs, prime_epochs: mne.E
     return rr_trials, ll_trials, rl_trials, lr_trials, rn_trials, ln_trials
 
 
+def get_trial_pip_score(args) -> Tuple[np.array, np.array, np.array, np.array, np.array]:
+    """
+    Calculate the pip score for a specific trial.
+    Compatible with multiprocessing.Pool.map function
+    :param args: Should contain:
+        * epochs_data - np.array of shape (n_trials, n_electrodes, n_timepoints)
+            containing the electrode voltages
+        * labels - np.array of shape (n_trials,)
+            containing the labels of the trials (0-incongruent, 1-congruent)
+        * epoch_vec - np.array of shape (n_trials,)
+            with all True values, is used for splitting to test and train
+        * trial_num - the number of the trial to calculate PIP score for
+    :return: Variants of the pip score and probability ratio over timepoints
+    """
+    epochs_data, labels, epoch_vec, trial_num = args
+    lda = LinearDiscriminantAnalysis()
+    epoch_vec[trial_num] = False
+    train_x, train_y = epochs_data[epoch_vec, ...], labels[epoch_vec]
+    test_x, test_y = epochs_data[~epoch_vec, ...], labels[~epoch_vec]
+    probs = np.zeros((epochs_data.shape[2], 2), dtype=np.float32)
+    # create classifier for each timepoint
+    for timepoint in range(epochs_data.shape[2]):
+        lda.fit(train_x[:, :, timepoint], train_y)
+        probs[timepoint, :] = lda.predict_proba(test_x[:, :, timepoint])
+    probs_ratio = probs[:, test_y] / probs[:, 1 - test_y]  # correct / incorrect
+    # reset the boolean vector
+    epoch_vec[trial_num] = True
+    return np.mean(probs_ratio), np.median(probs_ratio), np.mean(probs[:, test_y]), np.median(
+        probs[:, test_y]), probs_ratio
+
+
 def get_trial_pip_score_sliding(args) -> Tuple[np.array, np.array, np.array, np.array, np.array]:
     """
     Calculate the pip score for a specific trial.
@@ -210,17 +241,18 @@ def get_frequency_features(epochs):
             power_per_ch_dict[k + '_' + epochs.ch_names[ch_idx]] = curr_power[:, ch_idx]
     return pd.DataFrame(power_per_ch_dict)
 
-def get_beta_during_trial(epochs):
-    freqs = dict(beta=[12, 30])
-    tfr = mne.time_frequency.psd_multitaper(epochs.copy().crop(.1, .6), fmax=125, n_jobs=12, picks='eeg')
-    power_per_ch_dict = {}
-    for k in freqs.keys():
-        curr_power = tfr[0][:, :, (tfr[1] > freqs[k][0]) & (tfr[1] < freqs[k][1])].mean(
-            axis=2)  # get average power in each trial and channel for the requested frequency
-        for ch_idx in range(len(epochs.ch_names[:64])):
-            power_per_ch_dict[k + '_' + epochs.ch_names[ch_idx]] = (-1*channel_left[ch_idx])*curr_power[:, ch_idx]
-
-    return pd.DataFrame(power_per_ch_dict)
+#
+# def get_beta_during_trial(epochs):
+#     freqs = dict(beta=[12, 30])
+#     tfr = mne.time_frequency.psd_multitaper(epochs.copy().crop(.1, .6), fmax=125, n_jobs=12, picks='eeg')
+#     power_per_ch_dict = {}
+#     for k in freqs.keys():
+#         curr_power = tfr[0][:, :, (tfr[1] > freqs[k][0]) & (tfr[1] < freqs[k][1])].mean(
+#             axis=2)  # get average power in each trial and channel for the requested frequency
+#         for ch_idx in range(len(epochs.ch_names[:64])):
+#             power_per_ch_dict[k + '_' + epochs.ch_names[ch_idx]] = (-1 * channel_left[ch_idx]) * curr_power[:, ch_idx]
+#
+#     return pd.DataFrame(power_per_ch_dict)
 
 
 def get_exponent(epochs):
@@ -233,7 +265,7 @@ def get_exponent(epochs):
     curr_freqs = (psd[1][(psd[1] > 2) & (psd[1] < 100)])
     for i in tqdm(range(len(curr_power))):
         fg.fit(curr_freqs, curr_power[i], [1, 115], n_jobs=12)
-        curr_exps = fg.get_params('aperiodic_params','exponent')
+        curr_exps = fg.get_params('aperiodic_params', 'exponent')
         for ch_idx in range(len(epochs.ch_names[:64])):
             slope_per_ch_dict['slope_' + epochs.ch_names[ch_idx]] = curr_exps[ch_idx]
 
@@ -259,12 +291,12 @@ def get_binned_data(epochs, bin_dur=10):
 def get_filtered_data(epochs, freq=10):
     epochs = epochs.filter(l_freq=freq - 1.5, h_freq=freq + 1.5)
     dat = epochs.copy().crop(-.125, 0).get_data('eeg')
-    dat = dat[:,:,::15]
+    dat = dat[:, :, ::15]
     binned_df = {}
     for k in range(dat.shape[2] - 1):
         for ch_idx in range(dat.shape[1]):
-            binned_df[epochs.ch_names[ch_idx] + '_bin_' + str(k)] = dat[:, ch_idx,k] - np.mean(
-                dat[:, ch_idx,k])
+            binned_df[epochs.ch_names[ch_idx] + '_bin_' + str(k)] = dat[:, ch_idx, k] - np.mean(
+                dat[:, ch_idx, k])
     return pd.DataFrame(binned_df)
 
 

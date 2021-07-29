@@ -28,12 +28,12 @@ if __name__ == "__main__":
                 cue_epochs, prime_epochs)
             # extract epochs for trials where the cue was left/right
             prime_epochs_lc, labels_lc = utils.get_condition_prime_epochs_and_labels(prime_epochs, ll_trials,
-                                                                               rl_trials)  # type: mne.Epochs,np.array
+                                                                                     rl_trials)  # type: mne.Epochs,np.array
             prime_epochs_rc, labels_rc = utils.get_condition_prime_epochs_and_labels(prime_epochs, rr_trials, lr_trials)
             prime_epochs_nc, labels_nc = utils.get_condition_prime_epochs_and_labels(prime_epochs, rn_trials, ln_trials)
-            epochs_data_lc, epoch_vec_lc = utils.prepare_data_for_pip_scoring(prime_epochs_lc)
-            epochs_data_rc, epoch_vec_rc = utils.prepare_data_for_pip_scoring(prime_epochs_rc)
-            epochs_data_nc, epoch_vec_nc = utils.prepare_data_for_pip_scoring(prime_epochs_nc)
+            epochs_data_lc, epoch_vec_lc = utils.prepare_data_for_pip_scoring(prime_epochs_lc, raw.info['sfreq'])
+            epochs_data_rc, epoch_vec_rc = utils.prepare_data_for_pip_scoring(prime_epochs_rc, raw.info['sfreq'])
+            epochs_data_nc, epoch_vec_nc = utils.prepare_data_for_pip_scoring(prime_epochs_nc, raw.info['sfreq'])
             pool = mp.Pool()
             lc_pool_data = [(epochs_data_lc, labels_lc, epoch_vec_lc, i) for i in range(epochs_data_lc.shape[0])]
             rc_pool_data = [(epochs_data_rc, labels_rc, epoch_vec_rc, i) for i in range(epochs_data_rc.shape[0])]

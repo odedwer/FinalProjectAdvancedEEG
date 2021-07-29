@@ -2,6 +2,7 @@
 import numpy as np
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import make_pipeline
 import pandas as pd
 import mne
 import matplotlib.pyplot as plt
@@ -9,6 +10,7 @@ import preprocess_utilities as pu
 from tqdm import tqdm
 import seaborn as sns
 from typing import Tuple, List
+
 
 def load_data_clean(subject_number) -> mne.io.Raw:
     """
@@ -27,6 +29,16 @@ def load_data_clean(subject_number) -> mne.io.Raw:
     raw.interpolate_bads()
     raw.filter(l_freq=.5, h_freq=50, method='iir')
     return raw
+
+
+def get_decoding_scores(epochs, labels, kfold=17, classifier=LinearDiscriminantAnalysis, scoring='roc_auc',
+                        verbose=True, n_jobs=12):
+    classier_inst = classifier()
+    clf = make_pipeline(StandardScaler(), classier_inst)
+    time_decoding = mne.decoding.SlidingEstimator(clf, scoring=scoring, verbose=verbose, n_jobs=n_jobs)
+    scores = mne.decoding.cross_val_multiscore(estimator=time_decoding, X=epochs.get_data('eeg'), y=labels,
+                                               cv=kfold).mean(0)
+    return scores
 
 
 def get_prime_epochs(raw, events, tmin=-.4, tmax=1.1, baseline=(-.4, -.1)) -> mne.Epochs:
@@ -136,7 +148,7 @@ def get_trial_pip_score_sliding(args) -> Tuple[np.array, np.array, np.array, np.
         probs[:, test_y]), probs_ratio
 
 
-def prepare_data_for_pip_scoring(epochs):
+def prepare_data_for_pip_scoring(epochs,sfreq):
     """
     generate the relevant variables for "get_trial_pip_score" - scale the data, take only the relevant times
     :param epochs: The epochs to prepare
@@ -147,8 +159,8 @@ def prepare_data_for_pip_scoring(epochs):
     zero_idx = np.where(epochs.times == 0)[0].item()
     min_time = 0.1
     max_time = 0.6  # s
-    min_idx = np.round(raw.info['sfreq'] * min_time).astype(int)
-    max_idx = np.round(raw.info['sfreq'] * max_time).astype(int)
+    min_idx = np.round(sfreq * min_time).astype(int)
+    max_idx = np.round(sfreq* max_time).astype(int)
     epochs_data = epochs_data[:, :, zero_idx + min_idx:zero_idx + max_idx]
     for i in range(epochs_data.shape[2]):
         epochs_data[:, :, i] = StandardScaler().fit_transform(epochs_data[:, :, i])
@@ -233,6 +245,7 @@ def get_frequency_features(epochs):
         for ch_idx in range(len(epochs.ch_names[:64])):
             power_per_ch_dict[k + '_' + epochs.ch_names[ch_idx]] = curr_power[:, ch_idx]
     return pd.DataFrame(power_per_ch_dict)
+
 
 #
 # def get_beta_during_trial(epochs):

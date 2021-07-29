@@ -1,28 +1,8 @@
-from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
 import numpy as np
 import mne
-import mne.decoding as mnd
 import matplotlib.pyplot as plt
-import scipy
-import preprocess_utilities as pu
-from importlib import reload
-from tqdm import tqdm
 import utils
 from sys import stderr
-
-
-# %%
-def get_decoding_scores(epochs, labels, kfold=17, classifier=LinearDiscriminantAnalysis, scoring='roc_auc',
-                        verbose=True, n_jobs=12):
-    classier_inst = classifier()
-    clf = make_pipeline(StandardScaler(), classier_inst)
-    time_decoding = mne.decoding.SlidingEstimator(clf, scoring=scoring, verbose=verbose, n_jobs=n_jobs)
-    scores = mne.decoding.cross_val_multiscore(estimator=time_decoding, X=epochs.get_data('eeg'), y=labels,
-                                               cv=kfold).mean(0)
-    return scores
-
 
 # %% load data
 average_decoding_congruency = []
@@ -55,7 +35,7 @@ for s in subjects:
         prime_epochs_nc, labels_nc = utils.get_condition_prime_epochs_and_labels(prime_epochs, rn_trials, ln_trials)
         # create classifier
 
-        average_decoding_congruency.append(get_decoding_scores(prime_epochs_nc, labels_nc))
+        average_decoding_congruency.append(utils.get_decoding_scores(prime_epochs_nc, labels_nc))
     except Exception as e:
         failed_subject.append(s)
         print(f"==================================================\n"

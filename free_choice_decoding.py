@@ -13,9 +13,6 @@ n_cycles = freqs  # use constant t/f resolution
 baseline = [-.4, 1]  # baseline interval (in s)
 
 subjects = [331, 332, 333, 334, 335, 336, 337, 339, 342, 343, 344, 345, 346, 347, 349, 349]
-prime_epochs_list = []
-cue_epochs_list = []
-events_list = []
 failed_subject = []
 for s in subjects:
     try:
@@ -28,9 +25,6 @@ for s in subjects:
         cue_epochs = utils.get_cue_epochs(raw, events)
         _, _, _, _, rn_trials, ln_trials = utils.get_prime_cue_combination_trials(
             cue_epochs, prime_epochs)
-        prime_epochs_list.append(prime_epochs)
-        cue_epochs_list.append(cue_epochs)
-        events_list.append(events)
         # extract epochs for trials where the cue was left/right
         prime_epochs_nc, labels_nc = utils.get_condition_prime_epochs_and_labels(prime_epochs, rn_trials, ln_trials)
         # create classifier
@@ -51,23 +45,22 @@ mean_subjects_average_decoding_congruency = np.mean(average_decoding_congruency,
 std_subjects_average_decoding_congruency = np.std(average_decoding_congruency, axis=0)
 plt.figure()
 for i in range(len(average_decoding_congruency)):
-    plt.plot(prime_epochs_list[i].times, np.convolve(average_decoding_congruency[i], np.ones(21) / 21)[10:-10],
+    plt.plot(prime_epochs[i].times, np.convolve(average_decoding_congruency[i], np.ones(21) / 21)[10:-10],
              color='grey',
              alpha=0.1)  # moving average for better visualization
-epochs_prime = prime_epochs_list[0]
-plt.plot(epochs_prime.times, mean_subjects_average_decoding_congruency, label="average of all subjects")
+plt.plot(prime_epochs.times, mean_subjects_average_decoding_congruency, label="average of all subjects")
 boot_ci = mne.stats.bootstrap_confidence_interval(np.array(average_decoding_congruency), ci=0.99)
-plt.fill_between(epochs_prime.times, boot_ci[1], boot_ci[0], color='#3b7fb9', alpha=0.25, label="99% CI")
-plt.hlines(0.5, epochs_prime.times.min(), epochs_prime.times.max(), linestyles=':', colors='k', zorder=7)
+plt.fill_between(prime_epochs.times, boot_ci[1], boot_ci[0], color='#3b7fb9', alpha=0.25, label="99% CI")
+plt.hlines(0.5, prime_epochs.times.min(), prime_epochs.times.max(), linestyles=':', colors='k', zorder=7)
 plt.xlabel("Time (seconds)")
 plt.ylabel("ROC Area under curve")
 plt.xlim(-0.25, 1.05)
 plt.ylim(0.35, 0.8)
 plt.legend()
 plt.title(f'Incongruent VS congruent trials decoding for left cues and right cues')
-print(np.mean(mean_subjects_average_decoding_congruency[(0.6 > epochs_prime.times) & (epochs_prime.times > 0.2)]))
-print(np.mean(std_subjects_average_decoding_congruency[(0.6 > epochs_prime.times) & (epochs_prime.times > 0.2)]))
-print(np.std(mean_subjects_average_decoding_congruency[(0.6 > epochs_prime.times) & (epochs_prime.times > 0.2)]))
+print(np.mean(mean_subjects_average_decoding_congruency[(0.6 > prime_epochs.times) & (prime_epochs.times > 0.2)]))
+print(np.mean(std_subjects_average_decoding_congruency[(0.6 > prime_epochs.times) & (prime_epochs.times > 0.2)]))
+print(np.std(mean_subjects_average_decoding_congruency[(0.6 > prime_epochs.times) & (prime_epochs.times > 0.2)]))
 print(len(average_decoding_congruency))
 
 # # %% cross decoding

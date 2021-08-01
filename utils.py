@@ -1,5 +1,6 @@
 # %% imports
 import numpy as np
+import sklearn.metrics as metrics
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
@@ -39,6 +40,33 @@ def get_decoding_scores(epochs, labels, kfold=17, classifier=LinearDiscriminantA
     scores = mne.decoding.cross_val_multiscore(estimator=time_decoding, X=epochs.get_data('eeg'), y=labels,
                                                cv=kfold).mean(0)
     return scores
+
+
+def get_cross_decoding_fc_to_instructed(epochs_nc, epochs_lc, epochs_rc, labels_nc, labels_lc, labels_rc,
+                                        classifier=LinearDiscriminantAnalysis, scoring='roc_auc', verbose=True,
+                                        n_jobs=12):
+    classier_inst = classifier()
+    clf = make_pipeline(mne.decoding.Vectorizer(), StandardScaler(), mne.decoding.LinearModel(classier_inst))
+    time_decoding = mne.decoding.SlidingEstimator(clf, scoring=scoring, verbose=verbose, n_jobs=n_jobs)
+    time_decoding.fit(epochs_nc.get_data('eeg'), labels_nc)
+    # lc labels should be flipped, since left prime is 0 in nc
+    scores_lc = time_decoding.score(epochs_lc.get_data('eeg'), 1-labels_lc)
+    scores_rc = time_decoding.score(epochs_rc.get_data('eeg'), labels_rc)
+    return scores_lc, scores_rc
+
+
+def get_decoding_scores_and_weights(epochs, labels, kfold=17, classifier=LinearDiscriminantAnalysis, scoring='roc_auc',
+                                    verbose=True, n_jobs=12):
+    classier_inst = classifier()
+    clf = make_pipeline(mne.decoding.Vectorizer(), StandardScaler(), mne.decoding.LinearModel(classier_inst))
+
+    time_decoding = mne.decoding.SlidingEstimator(clf, scoring=scoring, verbose=verbose, n_jobs=n_jobs)
+    scores = mne.decoding.cross_val_multiscore(estimator=time_decoding, X=epochs.get_data('eeg'), y=labels,
+                                               cv=kfold).mean(0)
+    time_decoding.fit(epochs.get_data('eeg'), labels)
+    coef = mne.decoding.get_coef(time_decoding, 'patterns_', inverse_transform=True)
+    evoked_time_gen = mne.EvokedArray(np.squeeze(coef), epochs.copy().pick('eeg').info, tmin=epochs.times[0])
+    return scores, evoked_time_gen
 
 
 def get_prime_epochs(raw, events, tmin=-.4, tmax=1.1, baseline=(-.4, -.1)) -> mne.Epochs:
@@ -148,7 +176,7 @@ def get_trial_pip_score_sliding(args) -> Tuple[np.array, np.array, np.array, np.
         probs[:, test_y]), probs_ratio
 
 
-def prepare_data_for_pip_scoring(epochs,sfreq):
+def prepare_data_for_pip_scoring(epochs, sfreq):
     """
     generate the relevant variables for "get_trial_pip_score" - scale the data, take only the relevant times
     :param epochs: The epochs to prepare
@@ -160,7 +188,7 @@ def prepare_data_for_pip_scoring(epochs,sfreq):
     min_time = 0.1
     max_time = 0.6  # s
     min_idx = np.round(sfreq * min_time).astype(int)
-    max_idx = np.round(sfreq* max_time).astype(int)
+    max_idx = np.round(sfreq * max_time).astype(int)
     epochs_data = epochs_data[:, :, zero_idx + min_idx:zero_idx + max_idx]
     for i in range(epochs_data.shape[2]):
         epochs_data[:, :, i] = StandardScaler().fit_transform(epochs_data[:, :, i])

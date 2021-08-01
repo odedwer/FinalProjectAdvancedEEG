@@ -12,7 +12,8 @@ n_cycles = freqs  # use constant t/f resolution
 # vmin, vmax = -1, 1.5  # set min and max ERDS values in plot
 baseline = [-.4, 1]  # baseline interval (in s)
 
-subjects = [331, 332, 333, 334, 335, 336, 337, 339, 342, 343, 344, 345, 346, 347, 349, 349]
+subjects = [331, 332, 333, 334, 335, 336, 337, 339, 342, 343, 344, 345, 346, 347, 349]
+subjects = [333]
 failed_subject = []
 for s in subjects:
     try:
@@ -48,9 +49,9 @@ for i in range(len(average_decoding_congruency)):
     plt.plot(prime_epochs[i].times, np.convolve(average_decoding_congruency[i], np.ones(21) / 21)[10:-10],
              color='grey',
              alpha=0.1)  # moving average for better visualization
-plt.plot(prime_epochs.times, mean_subjects_average_decoding_congruency, label="average of all subjects")
-boot_ci = mne.stats.bootstrap_confidence_interval(np.array(average_decoding_congruency), ci=0.99)
-plt.fill_between(prime_epochs.times, boot_ci[1], boot_ci[0], color='#3b7fb9', alpha=0.25, label="99% CI")
+plt.plot(prime_epochs.times, mean_subjects_average_decoding_congruency,color="green", label="average of all subjects")
+boot_ci = mne.stats.bootstrap_confidence_interval(np.array(average_decoding_congruency), ci=0.95)
+plt.fill_between(prime_epochs.times, boot_ci[1], boot_ci[0], color='darkgreen', alpha=0.25, label="95% CI")
 plt.hlines(0.5, prime_epochs.times.min(), prime_epochs.times.max(), linestyles=':', colors='k', zorder=7)
 plt.xlabel("Time (seconds)")
 plt.ylabel("ROC Area under curve")

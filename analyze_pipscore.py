@@ -10,9 +10,8 @@ import statsmodels.formula.api as smf
 from tqdm import tqdm
 
 # %% read data per subject and unify them
-# subjects = [331, 332, 333, 334, 335, 336,337,339,342,344,345,346,347,349]
-subjects = [336]
-all_dfs = pd.concat([pd.read_csv(f"S{s}_df_filt.csv") for s in subjects])
+subjects = [331, 332, 333, 334, 335, 336,337,339,342,344,345,346,347,349]
+all_dfs = pd.concat([pd.read_csv(f"S{s}_df_with_neutral.csv") for s in subjects])
 print(all_dfs.groupby('congruent')['is_correct'].mean())
 print(all_dfs.groupby('congruent')['RT'].mean())
 print(all_dfs.groupby(['congruent', 'is_correct', "subject"])['mean_pip'].mean())
